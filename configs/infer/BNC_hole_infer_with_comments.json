@@ -1,0 +1,59 @@
+{
+  "_comment__file_purpose": "Controls runtime inference: feature extraction, template matching, correspondence filtering, and PnP pose estimation.",
+
+  "infer_opts": {
+    "_comment__version": "Internal config schema version.",
+    "version": "v1",
+
+    "_comment__object_dataset": "Dataset name used to locate templates and representations.",
+    "object_dataset": "BNC_hole",
+
+    "_comment__repre_version": "Representation version to use during inference.",
+    "repre_version": "v1",
+
+    "_comment__crop_rel_pad": "Relative padding applied when cropping detected object regions to avoid cutting off geometry.",
+    "crop_rel_pad": 0.2,
+
+    "_comment__crop_size": "Crop resolution (width, height) used for inference. Smaller is faster; larger retains more context.",
+    "crop_size": [420, 420],
+
+    "_comment__use_detections": "If true, assumes external object detections (e.g., bounding boxes) are provided.",
+    "use_detections": true,
+
+    "_comment__extractor_name": "Feature extractor configuration. Must match the extractor used during representation generation.",
+    "extractor_name": "dinov2_version=vits14-reg_stride=14_facet=token_layer=9_logbin=0_norm=1",
+
+    "_comment__grid_cell_size": "Spatial grid resolution for feature extraction. Typically equals ViT patch stride.",
+    "grid_cell_size": 14.0,
+
+    "_comment__match_template_type": "Template descriptor type used for matching. Must match representation (e.g., tfidf).",
+    "match_template_type": "tfidf",
+
+    "_comment__match_top_n_templates": "Number of top-matching templates passed to pose estimation. Higher improves recall but increases cost.",
+    "match_top_n_templates": 5,
+
+    "_comment__match_feat_matching_type": "Feature correspondence strategy. Cyclic buddies enforces mutual nearest-neighbor consistency.",
+    "match_feat_matching_type": "cyclic_buddies",
+
+    "_comment__match_top_k_buddies": "Number of feature correspondences retained for PnP. More improves robustness but adds outliers.",
+    "match_top_k_buddies": 300,
+
+    "_comment__pnp_type": "PnP backend used for pose estimation. OpenCV uses solvePnPRansac.",
+    "pnp_type": "opencv",
+
+    "_comment__pnp_ransac_iter": "Number of RANSAC iterations for PnP. Higher increases robustness at the cost of runtime.",
+    "pnp_ransac_iter": 400,
+
+    "_comment__pnp_inlier_thresh": "Reprojection error threshold (pixels) used to classify inliers during PnP.",
+    "pnp_inlier_thresh": 10.0,
+
+    "_comment__final_pose_type": "Strategy for selecting the final pose estimate from candidates.",
+    "final_pose_type": "best_coarse",
+
+    "_comment__num_preds_factor": "Multiplier on the number of pose hypotheses generated. Useful for multi-hypothesis evaluation.",
+    "num_preds_factor": 1,
+
+    "_comment__vis_results": "If true, visualizes intermediate matches and final pose estimates for debugging.",
+    "vis_results": true
+  }
+}

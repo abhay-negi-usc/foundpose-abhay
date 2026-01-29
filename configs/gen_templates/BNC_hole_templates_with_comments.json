@@ -1,0 +1,56 @@
+{
+  "_comment__file_purpose": "Controls template generation by rendering CAD models from multiple viewpoints and in-plane rotations.",
+
+  "gen_templates_opts": {
+    "_comment__version": "Internal config schema version used by FoundPose.",
+    "version": "v1",
+
+    "_comment__object_dataset": "Logical dataset name. Used for directory structure, caching, and bookkeeping.",
+    "object_dataset": "BNC_hole",
+
+    "_comment__object_lids": "List of object IDs (LIDs) to generate templates for. Useful when datasets contain multiple objects.",
+    "object_lids": [1],
+
+    "_comment__num_viewspheres": "Number of view-spheres used for camera sampling. 1 = uniform sampling over a single sphere.",
+    "num_viewspheres": 1,
+
+    "_comment__min_num_viewpoints": "Minimum number of camera viewpoints sampled on the view-sphere. Higher improves pose coverage but increases compute.",
+    "min_num_viewpoints": 128,
+
+    "_comment__num_inplane_rotations": "Number of in-plane rotations per viewpoint to capture rotational ambiguity around the camera optical axis.",
+    "num_inplane_rotations": 36,
+
+    "_comment__images_per_view": "Number of rendered images per (viewpoint × in-plane rotation). Usually 1 unless randomness is enabled.",
+    "images_per_view": 1,
+
+    "_comment__max_num_triangles": "Maximum triangle count allowed in the mesh. Meshes are decimated above this threshold to speed up rendering.",
+    "max_num_triangles": 20000,
+
+    "_comment__back_face_culling": "If true, triangles facing away from the camera are discarded. False is safer for thin or concave objects.",
+    "back_face_culling": false,
+
+    "_comment__texture_size": "Resolution of texture maps used during rendering. Larger improves visual fidelity at the cost of memory.",
+    "texture_size": [1024, 1024],
+
+    "_comment__ssaa_factor": "Super-sampling anti-aliasing factor. Values >1 improve edge quality but increase render time.",
+    "ssaa_factor": 4.0,
+
+    "_comment__background_type": "Background color or style for rendered templates. Black reduces feature contamination.",
+    "background_type": "black",
+
+    "_comment__light_type": "Lighting configuration. Multi-directional lighting improves robustness to real-world illumination changes.",
+    "light_type": "multi_directional",
+
+    "_comment__features_patch_size": "Patch size used by the feature extractor backbone. Must be consistent with the ViT configuration.",
+    "features_patch_size": 12,
+
+    "_comment__crop": "Whether rendered images are cropped around the object bounding box. False keeps full-frame renders.",
+    "crop": false,
+
+    "_comment__crop_rel_pad": "Relative padding added around the object when cropping is enabled.",
+    "crop_rel_pad": 0.2,
+
+    "_comment__crop_size": "Final resolution (width, height) after cropping. Only used if crop=true.",
+    "crop_size": [1280, 720]
+  }
+}

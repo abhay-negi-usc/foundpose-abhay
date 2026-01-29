@@ -51,6 +51,37 @@ from utils.misc import warp_depth_image, warp_image
 
 logger: logging.Logger = logging.get_logger()
 
+def warp_mask_nearest(*, src_camera, dst_camera, mask_hw: np.ndarray) -> np.ndarray:
+    if mask_hw is None:
+        return None
+
+    mask = np.asarray(mask_hw)
+
+    # Accept only HxW or HxWx1
+    if mask.ndim == 2:
+        mask_in = mask[..., None]
+    elif mask.ndim == 3 and mask.shape[2] == 1:
+        mask_in = mask
+    else:
+        raise ValueError(f"warp_mask_nearest expected HxW or HxWx1, got {mask.shape}")
+
+    if mask_in.dtype != np.uint8:
+        mask_in = mask_in.astype(np.uint8)
+
+    mask_warp = warp_image(
+        src_camera=src_camera,
+        dst_camera=dst_camera,
+        src_image=mask_in,
+        interpolation=cv2.INTER_NEAREST,
+    )
+
+    # Enforce HxW output
+    if mask_warp.ndim == 3 and mask_warp.shape[2] == 1:
+        mask_warp = mask_warp[..., 0]
+    elif mask_warp.ndim != 2:
+        raise ValueError(f"warp_image returned unexpected mask shape {mask_warp.shape}")
+
+    return mask_warp
 
 class InferOpts(NamedTuple):
     """Options that can be specified via the command line."""
@@ -160,13 +191,31 @@ def infer(opts: InferOpts) -> None:
     scene_gts = {}
     scene_gts_info = {}
     scene_cameras = {}
+
     for scene_id in scene_im_ids.keys():
-        scene_cameras[scene_id] = data_util.load_chunk_cameras(bop_test_split_props["scene_camera_tpath"].format(scene_id=scene_id), bop_test_split_props["im_size"])
-        scene_gts[scene_id] = data_util.load_chunk_gts(bop_test_split_props["scene_gt_tpath"].format(scene_id=scene_id),opts.object_dataset)
-        scene_gts_info[scene_id] = json_util.load_json(
-            bop_test_split_props["scene_gt_info_tpath"].format(scene_id=scene_id),
-            keys_to_int=True,
+        # Cameras are required.
+        scene_cameras[scene_id] = data_util.load_chunk_cameras(
+            bop_test_split_props["scene_camera_tpath"].format(scene_id=scene_id),
+            bop_test_split_props["im_size"],
         )
+
+        # Ground-truth is OPTIONAL for pure inference.
+        gt_path = bop_test_split_props["scene_gt_tpath"].format(scene_id=scene_id)
+        gt_info_path = bop_test_split_props["scene_gt_info_tpath"].format(scene_id=scene_id)
+
+        if os.path.exists(gt_path) and os.path.exists(gt_info_path):
+            scene_gts[scene_id] = data_util.load_chunk_gts(gt_path, opts.object_dataset)
+            scene_gts_info[scene_id] = json_util.load_json(gt_info_path, keys_to_int=True)
+        else:
+            # IMPORTANT: prepare_sample() expects dict-like chunk_gts[scene_id][im_id]
+            # even if there is no GT. So create empty per-image entries.
+            scene_gts[scene_id] = {int(im_id): [] for im_id in scene_im_ids[scene_id]}
+            scene_gts_info[scene_id] = {int(im_id): [] for im_id in scene_im_ids[scene_id]}
+            logger.warning(
+                f"No GT found for scene {scene_id} (missing {gt_path} / {gt_info_path}). "
+                "Running inference without evaluation."
+            )
+
 
     # Create a renderer.
     renderer_type = renderer_builder.RendererType.PYRENDER_RASTERIZER
@@ -397,8 +446,44 @@ def infer(opts: InferOpts) -> None:
                 # Get the input image.
                 orig_image_np_hwc = sample.image.astype(np.float32)/255.0
 
+                H_img, W_img = orig_image_np_hwc.shape[:2]
+                W_cam, H_cam = orig_camera_c2w.width, orig_camera_c2w.height
+
+                if (W_img, H_img) != (W_cam, H_cam):
+                    # If camera is square (700x700) but RGB is 1280x720, do center square crop then resize
+                    if W_cam == H_cam and W_img != H_img:
+                        side = min(H_img, W_img)  # 720
+                        x0 = (W_img - side) // 2  # (1280-720)//2 = 280
+                        y0 = (H_img - side) // 2  # (720-720)//2 = 0
+                        rgb_sq = orig_image_np_hwc[y0:y0+side, x0:x0+side]  # 720x720
+
+                        # Resize to camera size
+                        orig_image_np_hwc = cv2.resize(
+                            rgb_sq, (W_cam, H_cam),
+                            interpolation=cv2.INTER_AREA if side >= W_cam else cv2.INTER_LINEAR
+                        )
+                    else:
+                        # Generic fallback: resize to camera dims (note: can distort if aspect differs)
+                        orig_image_np_hwc = cv2.resize(
+                            orig_image_np_hwc, (W_cam, H_cam),
+                            interpolation=cv2.INTER_AREA if (H_img >= H_cam and W_img >= W_cam) else cv2.INTER_LINEAR
+                        )
+
+
                 # Get the modal mask and amodal bounding box of the instance.
                 orig_mask_modal = instance["input_mask_modal"]
+                orig_mask_modal = np.asarray(orig_mask_modal)
+                if orig_mask_modal.ndim != 2:
+                    raise ValueError(
+                        f"orig_mask_modal must be dense HxW before warping/cropping; got {orig_mask_modal.shape}. "
+                        "You're likely using an encoded mask (e.g., RLE counts). Decode it to HxW first."
+                    )
+                
+                print("AFTER ALIGN -> img:", orig_image_np_hwc.shape,
+                "mask:", np.asarray(orig_mask_modal).shape,
+                "cam:", (orig_camera_c2w.width, orig_camera_c2w.height))
+
+
                 orig_box_amodal = AlignedBox2f(
                     left=instance["input_box_amodal"][0],
                     top=instance["input_box_amodal"][1],
@@ -441,15 +526,55 @@ def infer(opts: InferOpts) -> None:
                         src_image=orig_image_np_hwc,
                         interpolation=interpolation,
                     )
-                    mask_modal = warp_image(
+                    mask_modal = warp_mask_nearest(
                         src_camera=orig_camera_c2w,
                         dst_camera=crop_camera_model_c2w,
-                        src_image=orig_mask_modal,
-                        interpolation=cv2.INTER_NEAREST,
+                        mask_hw=orig_mask_modal,
                     )
 
+                    # after computing mask_modal/camera_c2w:
+                    instance["input_mask_modal_cropped"] = mask_modal
+
+                    # Warp RGB to crop camera
+                    interpolation = cv2.INTER_AREA if crop_box.width >= crop_camera_model_c2w.width else cv2.INTER_LINEAR
+                    image_np_hwc = warp_image(
+                        src_camera=orig_camera_c2w,
+                        dst_camera=crop_camera_model_c2w,
+                        src_image=orig_image_np_hwc,
+                        interpolation=interpolation,
+                    )
+
+                    # Warp the *dense* mask to crop camera (this must be HxW input)
+                    mask_modal = warp_mask_nearest(
+                        src_camera=orig_camera_c2w,
+                        dst_camera=crop_camera_model_c2w,
+                        mask_hw=orig_mask_modal,
+                    )
+
+                    # Save explicitly so we never confuse it with encoded masks later
+                    instance["input_mask_modal_cropped"] = mask_modal
+
+                    # Recompute bbox from the cropped dense mask
+                    ys, xs = np.nonzero(mask_modal)
+                    box = np.array(misc_util.calc_2d_box(xs, ys))
+                    box_amodal = AlignedBox2f(left=box[0], top=box[1], right=box[2], bottom=box[3])
+
+
                     # Recalculate the object bounding box (it changed if we constructed the virtual camera).
-                    ys, xs = mask_modal.nonzero()
+                    mask_modal = np.asarray(mask_modal)
+
+                    # Ensure mask is 2D HxW
+                    if mask_modal.ndim == 3 and mask_modal.shape[2] == 1:
+                        mask_modal = mask_modal[..., 0]
+                    elif mask_modal.ndim == 1:
+                        # This should not happen; catch it early with a clearer error
+                        raise ValueError(f"mask_modal became 1D with shape {mask_modal.shape}. "
+                                        "Expected HxW. Check warp_mask_nearest / warp_image usage.")
+                    elif mask_modal.ndim != 2:
+                        raise ValueError(f"Unexpected mask_modal shape: {mask_modal.shape}")
+
+                    ys, xs = np.nonzero(mask_modal)
+
                     box = np.array(misc_util.calc_2d_box(xs, ys))
                     box_amodal = AlignedBox2f(
                         left=box[0],
@@ -689,6 +814,29 @@ def infer(opts: InferOpts) -> None:
                         ]
 
                         timer.start()
+                        gt_mask = instance["gt_anno"].masks_modal
+                        if opts.crop:
+                            gt_mask = warp_image(
+                                src_camera=orig_camera_c2w,
+                                dst_camera=camera_c2w,
+                                src_image=gt_mask,
+                                interpolation=cv2.INTER_NEAREST,
+                            )
+
+                        # These are the masks that correspond to `camera_c2w` and `vis_base_image`.
+                        pred_mask_for_eval = mask_modal  # already cropped if opts.crop else original
+
+                        gt_mask_for_eval = None
+                        if instance["gt_anno"] is not None:
+                            gt_mask_for_eval = instance["gt_anno"].masks_modal
+                            if opts.crop:
+                                gt_mask_for_eval = warp_mask_nearest(
+                                    src_camera=orig_camera_c2w,
+                                    dst_camera=camera_c2w,  # crop camera
+                                    mask_hw=gt_mask_for_eval,
+                                )
+                            instance["gt_mask_modal_cropped"] = gt_mask_for_eval
+
                         pose_eval_dict = pose_evaluator.update(
                             scene_id=bop_chunk_id,
                             im_id=bop_im_id,
@@ -701,8 +849,8 @@ def infer(opts: InferOpts) -> None:
                             object_pose_m2w_gt=instance["gt_anno"].pose,
                             orig_camera_c2w=orig_camera_c2w,
                             camera_c2w=camera_c2w,
-                            pred_mask=instance["input_mask_modal"],
-                            gt_mask=instance["gt_anno"].masks_modal,
+                            pred_mask=pred_mask_for_eval,
+                            gt_mask=gt_mask_for_eval,
                             corresp=best_corresp_np,
                             retrieved_templates_camera_m2c=retrieved_templates_camera_m2c,
                             time_per_inst=times,
@@ -787,19 +935,20 @@ def infer(opts: InferOpts) -> None:
                         inout.save_im(vis_path, vis_grid)
                         logger.info(f"Visualization saved to {vis_path}")
 
-                        if opts.debug:
-                            pts_path = os.path.join(
-                                output_dir,
-                                f"{bop_chunk_id}_{bop_im_id}_{object_lid}_{inst_j}_{hypothesis_id}_vertice_error.ply",
-                            )
-                            vis_util.vis_pointcloud_error(
-                                repre_np,
-                                pose_m2w,
-                                object_pose_m2w_gt,
-                                camera_c2w,
-                                0,
-                                pts_path,
-                            )
+                    if opts.debug and object_pose_m2w_gt is not None:
+                        pts_path = os.path.join(
+                            output_dir,
+                            f"{bop_chunk_id}_{bop_im_id}_{object_lid}_{inst_j}_{hypothesis_id}_vertice_error.ply",
+                        )
+                        vis_util.vis_pointcloud_error(
+                            repre_np,
+                            pose_m2w,
+                            object_pose_m2w_gt,
+                            camera_c2w,
+                            0,
+                            pts_path,
+                        )
+
 
         # Empty unused GPU cache variables.
         if device == "cuda":

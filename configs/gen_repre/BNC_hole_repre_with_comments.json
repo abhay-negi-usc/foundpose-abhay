@@ -1,0 +1,40 @@
+{
+  "_comment__file_purpose": "Controls feature extraction, dimensionality reduction, and template indexing for fast matching.",
+
+  "gen_repre_opts": {
+    "_comment__version": "Internal config schema version.",
+    "version": "v1",
+
+    "_comment__templates_version": "Template version to load as input for representation generation.",
+    "templates_version": "v1",
+
+    "_comment__object_dataset": "Dataset name. Must match the dataset used during template generation.",
+    "object_dataset": "BNC_hole",
+
+    "_comment__object_lids": "List of object IDs (LIDs) whose templates will be indexed.",
+    "object_lids": [1],
+
+    "_comment__extractor_name": "Feature extractor configuration string. Defines backbone, patch stride, feature type, and normalization.",
+    "extractor_name": "dinov2_version=vits14-reg_stride=14_facet=token_layer=9_logbin=0_norm=1",
+
+    "_comment__grid_cell_size": "Spatial resolution (in pixels) used to aggregate features into grid cells. Typically equals ViT patch stride.",
+    "grid_cell_size": 14.0,
+
+    "_comment__apply_pca": "Whether to apply PCA to reduce feature dimensionality. Improves memory usage and matching speed.",
+    "apply_pca": true,
+
+    "_comment__pca_components": "Number of PCA components retained. Lower is faster; higher preserves more discriminative power.",
+    "pca_components": 256,
+
+    "_comment__cluster_features": "Whether to cluster features into a visual vocabulary. Required for TF-IDF matching.",
+    "cluster_features": true,
+
+    "_comment__cluster_num": "Number of clusters (visual words). Larger values give finer discrimination but increase memory and compute.",
+    "cluster_num": 2048,
+
+    "template_desc_opts": {
+      "_comment__desc_type": "Descriptor construction method. TF-IDF treats each template as a document over visual words.",
+      "desc_type": "tfidf"
+    }
+  }
+}

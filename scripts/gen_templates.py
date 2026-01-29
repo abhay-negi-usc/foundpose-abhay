@@ -361,6 +361,7 @@ def synthesize_templates(opts: GenTemplatesOpts) -> None:
 
                 # In case we are not cropping.
                 else:
+                    trans_c2w = np.eye(4) # defining world wrt camera to be identity 
                     camera_model_c2w = PinholePlaneCameraModel(
                         width=camera_model.width,
                         height=camera_model.height,

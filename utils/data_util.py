@@ -57,7 +57,7 @@ def prepare_sample(
         A packed FrameSequence represented as a dictionary that can be msgpacked.
     """
 
-    opts = DatasetOpts()
+    opts = DatasetOpts(crop_image_center=False)
 
     # IDs of the dataset chunk and the image.
     chunk_id, im_id = sample_info["scene_id"], sample_info["im_id"]
